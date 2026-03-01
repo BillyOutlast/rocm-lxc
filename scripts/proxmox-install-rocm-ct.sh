@@ -667,7 +667,7 @@ EOF"
     fi
 
     msg_info "Installing Open WebUI in CT ${CTID}"
-    pct exec "${CTID}" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; apt-get -y install python3 python3-venv python3-pip git; id -u openwebui >/dev/null 2>&1 || useradd -r -m -d /opt/open-webui -s /usr/sbin/nologin openwebui; mkdir -p /opt/open-webui /var/lib/open-webui; chown -R openwebui:openwebui /opt/open-webui /var/lib/open-webui; python3 -m venv /opt/open-webui/.venv; /opt/open-webui/.venv/bin/pip install --upgrade pip setuptools wheel; /opt/open-webui/.venv/bin/pip install --upgrade open-webui'
+    pct exec "${CTID}" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; apt-get -y install python3 python3-venv python3-pip git; id -u openwebui >/dev/null 2>&1 || useradd -r -m -d /opt/open-webui -s /usr/sbin/nologin openwebui; mkdir -p /opt/open-webui /var/lib/open-webui; chown -R openwebui:openwebui /opt/open-webui /var/lib/open-webui; python3 -m venv /opt/open-webui/.venv; /opt/open-webui/.venv/bin/pip install --upgrade pip setuptools wheel; /opt/open-webui/.venv/bin/pip install --upgrade --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple torch; /opt/open-webui/.venv/bin/pip install --upgrade open-webui'
     pct exec "${CTID}" -- bash -lc "cat > /etc/systemd/system/open-webui.service <<EOF
 [Unit]
 Description=Open WebUI Server
