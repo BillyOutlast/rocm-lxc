@@ -29,6 +29,46 @@ prompt_yes_no() {
   [[ "${value}" == "y" || "${value}" == "yes" ]]
 }
 
+configure_ct_apt_network() {
+  local ctid="$1"
+  pct exec "${ctid}" -- bash -lc '
+set -euo pipefail
+cat > /etc/apt/apt.conf.d/99rocm-lxc-network <<EOF
+Acquire::Retries "10";
+Acquire::ForceIPv4 "true";
+Acquire::http::Timeout "30";
+Acquire::https::Timeout "30";
+Acquire::http::Pipeline-Depth "0";
+EOF
+
+if [[ -f /etc/apt/sources.list ]]; then
+  sed -i "s|http://archive.ubuntu.com/ubuntu|http://mirrors.edge.kernel.org/ubuntu|g" /etc/apt/sources.list
+  sed -i "s|https://archive.ubuntu.com/ubuntu|http://mirrors.edge.kernel.org/ubuntu|g" /etc/apt/sources.list
+fi
+
+if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then
+  sed -i "s|http://archive.ubuntu.com/ubuntu|http://mirrors.edge.kernel.org/ubuntu|g" /etc/apt/sources.list.d/ubuntu.sources
+  sed -i "s|https://archive.ubuntu.com/ubuntu|http://mirrors.edge.kernel.org/ubuntu|g" /etc/apt/sources.list.d/ubuntu.sources
+fi
+'
+}
+
+ct_apt_update_retry() {
+  local ctid="$1"
+  pct exec "${ctid}" -- bash -lc '
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+for attempt in 1 2 3 4 5; do
+  if apt-get -o Acquire::Retries=10 -o Acquire::ForceIPv4=true update; then
+    exit 0
+  fi
+  sleep $((attempt * 2))
+done
+echo "apt-get update failed after retries" >&2
+exit 1
+'
+}
+
 if [[ "${EUID}" -ne 0 ]]; then
   msg_error "Run this script as root on a Proxmox host"
   exit 1
@@ -55,7 +95,9 @@ else
 fi
 
 msg_info "Updating packages in CT ${CTID}"
-pct exec "${CTID}" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; apt-get update; apt-get -y full-upgrade; apt-get -y autoremove; apt-get autoclean'
+configure_ct_apt_network "${CTID}"
+ct_apt_update_retry "${CTID}"
+pct exec "${CTID}" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; apt-get -y full-upgrade; apt-get -y autoremove; apt-get autoclean'
 
 if prompt_yes_no "Update Ollama in CT ${CTID}" "no"; then
   msg_info "Updating Ollama"
@@ -66,7 +108,7 @@ fi
 
 if prompt_yes_no "Update vLLM in CT ${CTID}" "no"; then
   msg_info "Updating vLLM"
-  pct exec "${CTID}" -- bash -lc 'if [[ -x /opt/vllm/.venv/bin/pip ]]; then /opt/vllm/.venv/bin/pip install --upgrade pip setuptools wheel vllm; else export DEBIAN_FRONTEND=noninteractive; apt-get update; apt-get -y install python3 python3-venv python3-pip; mkdir -p /opt/vllm; python3 -m venv /opt/vllm/.venv; /opt/vllm/.venv/bin/pip install --upgrade pip setuptools wheel vllm; fi'
+  pct exec "${CTID}" -- bash -lc 'if [[ -x /opt/vllm/.venv/bin/pip ]]; then /opt/vllm/.venv/bin/pip install --upgrade pip setuptools wheel vllm; else export DEBIAN_FRONTEND=noninteractive; apt-get -y install python3 python3-venv python3-pip; mkdir -p /opt/vllm; python3 -m venv /opt/vllm/.venv; /opt/vllm/.venv/bin/pip install --upgrade pip setuptools wheel vllm; fi'
   if pct exec "${CTID}" -- bash -lc 'systemctl list-unit-files | grep -q "^vllm.service"'; then
     pct exec "${CTID}" -- bash -lc 'systemctl daemon-reload; systemctl restart vllm; systemctl enable vllm'
     msg_ok "vLLM updated and service restarted"
@@ -77,7 +119,7 @@ fi
 
 if prompt_yes_no "Update llama.cpp in CT ${CTID}" "no"; then
   msg_info "Updating llama.cpp"
-  pct exec "${CTID}" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; apt-get update; apt-get -y install git build-essential cmake pkg-config hipcc rocminfo; if [[ -d /opt/llama.cpp/.git ]]; then git -C /opt/llama.cpp pull --ff-only; else git clone https://github.com/ggml-org/llama.cpp /opt/llama.cpp; fi; cmake -S /opt/llama.cpp -B /opt/llama.cpp/build -DGGML_HIP=ON -DCMAKE_BUILD_TYPE=Release; cmake --build /opt/llama.cpp/build -j"$(nproc)"'
+  pct exec "${CTID}" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; apt-get -y install git build-essential cmake pkg-config hipcc rocminfo; if [[ -d /opt/llama.cpp/.git ]]; then git -C /opt/llama.cpp pull --ff-only; else git clone https://github.com/ggml-org/llama.cpp /opt/llama.cpp; fi; cmake -S /opt/llama.cpp -B /opt/llama.cpp/build -DGGML_HIP=ON -DCMAKE_BUILD_TYPE=Release; cmake --build /opt/llama.cpp/build -j"$(nproc)"'
   if pct exec "${CTID}" -- bash -lc 'systemctl list-unit-files | grep -q "^llama-cpp.service"'; then
     pct exec "${CTID}" -- bash -lc 'systemctl daemon-reload; systemctl restart llama-cpp; systemctl enable llama-cpp'
     msg_ok "llama.cpp updated and service restarted"
@@ -88,7 +130,7 @@ fi
 
 if prompt_yes_no "Update Open WebUI in CT ${CTID}" "no"; then
   msg_info "Updating Open WebUI"
-  pct exec "${CTID}" -- bash -lc 'if [[ -x /opt/open-webui/.venv/bin/pip ]]; then /opt/open-webui/.venv/bin/pip install --upgrade git+https://github.com/open-webui/open-webui.git; else export DEBIAN_FRONTEND=noninteractive; apt-get update; apt-get -y install python3 python3-venv python3-pip git; id -u openwebui >/dev/null 2>&1 || useradd -r -m -d /opt/open-webui -s /usr/sbin/nologin openwebui; mkdir -p /opt/open-webui /var/lib/open-webui; chown -R openwebui:openwebui /opt/open-webui /var/lib/open-webui; python3 -m venv /opt/open-webui/.venv; /opt/open-webui/.venv/bin/pip install --upgrade pip setuptools wheel; /opt/open-webui/.venv/bin/pip install --upgrade git+https://github.com/open-webui/open-webui.git; fi'
+  pct exec "${CTID}" -- bash -lc 'if [[ -x /opt/open-webui/.venv/bin/pip ]]; then /opt/open-webui/.venv/bin/pip install --upgrade git+https://github.com/open-webui/open-webui.git; else export DEBIAN_FRONTEND=noninteractive; apt-get -y install python3 python3-venv python3-pip git; id -u openwebui >/dev/null 2>&1 || useradd -r -m -d /opt/open-webui -s /usr/sbin/nologin openwebui; mkdir -p /opt/open-webui /var/lib/open-webui; chown -R openwebui:openwebui /opt/open-webui /var/lib/open-webui; python3 -m venv /opt/open-webui/.venv; /opt/open-webui/.venv/bin/pip install --upgrade pip setuptools wheel; /opt/open-webui/.venv/bin/pip install --upgrade git+https://github.com/open-webui/open-webui.git; fi'
   if pct exec "${CTID}" -- bash -lc 'systemctl list-unit-files | grep -q "^open-webui.service"'; then
     pct exec "${CTID}" -- bash -lc 'systemctl daemon-reload; systemctl restart open-webui; systemctl enable open-webui'
     msg_ok "Open WebUI updated and service restarted"
@@ -99,7 +141,7 @@ fi
 
 if prompt_yes_no "Update ComfyUI in CT ${CTID}" "no"; then
   msg_info "Updating ComfyUI"
-  pct exec "${CTID}" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; apt-get update; apt-get -y install python3 python3-venv python3-pip git; if [[ -d /opt/comfyui/.git ]]; then git -C /opt/comfyui pull --ff-only; else rm -rf /opt/comfyui; git clone https://github.com/Comfy-Org/ComfyUI /opt/comfyui; fi; if [[ ! -x /opt/comfyui/.venv/bin/pip ]]; then python3 -m venv /opt/comfyui/.venv; fi; /opt/comfyui/.venv/bin/pip install --upgrade pip setuptools wheel; /opt/comfyui/.venv/bin/pip install -r /opt/comfyui/requirements.txt; id -u comfyui >/dev/null 2>&1 || useradd -r -m -d /opt/comfyui -s /usr/sbin/nologin comfyui; chown -R comfyui:comfyui /opt/comfyui /var/lib/comfyui || true'
+  pct exec "${CTID}" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; apt-get -y install python3 python3-venv python3-pip git; if [[ -d /opt/comfyui/.git ]]; then git -C /opt/comfyui pull --ff-only; else rm -rf /opt/comfyui; git clone https://github.com/Comfy-Org/ComfyUI /opt/comfyui; fi; if [[ ! -x /opt/comfyui/.venv/bin/pip ]]; then python3 -m venv /opt/comfyui/.venv; fi; /opt/comfyui/.venv/bin/pip install --upgrade pip setuptools wheel; /opt/comfyui/.venv/bin/pip install -r /opt/comfyui/requirements.txt; id -u comfyui >/dev/null 2>&1 || useradd -r -m -d /opt/comfyui -s /usr/sbin/nologin comfyui; chown -R comfyui:comfyui /opt/comfyui /var/lib/comfyui || true'
 
   if prompt_yes_no "Update ComfyUI-Manager in CT ${CTID}" "yes"; then
     msg_info "Updating ComfyUI-Manager"

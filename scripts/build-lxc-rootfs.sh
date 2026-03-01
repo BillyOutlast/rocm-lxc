@@ -29,7 +29,7 @@ docker start "${CONTAINER_ID}" >/dev/null
 
 if [[ "${INSTALL_INIT_SYSTEM}" == "yes" ]]; then
   echo "Installing init system packages for LXC boot compatibility..."
-  docker exec "${CONTAINER_ID}" /bin/bash -lc "export DEBIAN_FRONTEND=noninteractive; apt-get update; apt-get -y install ${INIT_PACKAGES}; apt-get clean; rm -rf /var/lib/apt/lists/*"
+  docker exec "${CONTAINER_ID}" /bin/bash -lc "export DEBIAN_FRONTEND=noninteractive; apt-get -o Acquire::Retries=10 -o Acquire::ForceIPv4=true -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update; apt-get -y install ${INIT_PACKAGES}; apt-get clean; rm -rf /var/lib/apt/lists/*"
 fi
 
 echo "Exporting filesystem..."

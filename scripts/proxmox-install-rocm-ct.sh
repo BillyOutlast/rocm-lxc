@@ -113,6 +113,46 @@ prompt_yes_no() {
   [[ "${value}" == "y" || "${value}" == "yes" ]]
 }
 
+configure_ct_apt_network() {
+  local ctid="$1"
+  pct exec "${ctid}" -- bash -lc '
+set -euo pipefail
+cat > /etc/apt/apt.conf.d/99rocm-lxc-network <<EOF
+Acquire::Retries "10";
+Acquire::ForceIPv4 "true";
+Acquire::http::Timeout "30";
+Acquire::https::Timeout "30";
+Acquire::http::Pipeline-Depth "0";
+EOF
+
+if [[ -f /etc/apt/sources.list ]]; then
+  sed -i "s|http://archive.ubuntu.com/ubuntu|http://mirrors.edge.kernel.org/ubuntu|g" /etc/apt/sources.list
+  sed -i "s|https://archive.ubuntu.com/ubuntu|http://mirrors.edge.kernel.org/ubuntu|g" /etc/apt/sources.list
+fi
+
+if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then
+  sed -i "s|http://archive.ubuntu.com/ubuntu|http://mirrors.edge.kernel.org/ubuntu|g" /etc/apt/sources.list.d/ubuntu.sources
+  sed -i "s|https://archive.ubuntu.com/ubuntu|http://mirrors.edge.kernel.org/ubuntu|g" /etc/apt/sources.list.d/ubuntu.sources
+fi
+'
+}
+
+ct_apt_update_retry() {
+  local ctid="$1"
+  pct exec "${ctid}" -- bash -lc '
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+for attempt in 1 2 3 4 5; do
+  if apt-get -o Acquire::Retries=10 -o Acquire::ForceIPv4=true update; then
+    exit 0
+  fi
+  sleep $((attempt * 2))
+done
+echo "apt-get update failed after retries" >&2
+exit 1
+'
+}
+
 download_template_from_release() {
   local template_volume="$1"
   local repo="${GITHUB_REPO:-BillyOutlast/rocm-lxc}"
@@ -446,7 +486,9 @@ if [[ "${INSTALL_OLLAMA}" == "yes" || "${INSTALL_VLLM}" == "yes" || "${INSTALL_L
   fi
 
   msg_info "Preparing container package baseline"
-  pct exec "${CTID}" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; apt-get update; apt-get -y install curl ca-certificates gnupg lsb-release software-properties-common'
+  configure_ct_apt_network "${CTID}"
+  ct_apt_update_retry "${CTID}"
+  pct exec "${CTID}" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; apt-get -y install curl ca-certificates gnupg lsb-release software-properties-common'
 
   if [[ "${INSTALL_OLLAMA}" == "yes" ]]; then
     msg_info "Installing Ollama in CT ${CTID}"

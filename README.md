@@ -183,6 +183,8 @@ If CT startup fails and GPU passthrough was enabled, installer scripts automatic
 
 Installer scripts also validate that CT rootfs contains an init binary (`/sbin/init` or `/lib/systemd/systemd`) before first start, and run `pct start --debug` diagnostics when startup still fails.
 
+Installer and updater scripts now harden APT networking inside the CT (retries, force IPv4, timeouts, and Ubuntu mirror fallback from `archive.ubuntu.com` to `mirrors.edge.kernel.org`) to reduce repeated `Tried to start delayed item ... InRelease, but failed` warnings.
+
 ## Notes for ROCm in LXC
 
 ROCm in LXC usually requires additional host and container configuration (device nodes, cgroup permissions, and matching kernel/driver stack). The template build only converts filesystem contents; it does not configure GPU passthrough automatically.
