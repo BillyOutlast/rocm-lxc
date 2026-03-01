@@ -6,6 +6,13 @@ msg_ok() { printf "[OK] %s\n" "$1"; }
 msg_warn() { printf "[WARN] %s\n" "$1"; }
 msg_error() { printf "[ERROR] %s\n" "$1"; }
 
+template_file_exists() {
+  local template_volume="$1"
+  local resolved_path
+  resolved_path="$(pvesm path "${template_volume}" 2>/dev/null || true)"
+  [[ -n "${resolved_path}" && -f "${resolved_path}" ]]
+}
+
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
     msg_error "Missing required command: $1"
@@ -275,7 +282,7 @@ if pct status "${CTID}" >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! pvesm path "${TEMPLATE}" >/dev/null 2>&1; then
+if ! template_file_exists "${TEMPLATE}"; then
   msg_warn "Template not found in storage: ${TEMPLATE}"
   if prompt_yes_no "Download template from GitHub Release automatically" "yes"; then
     if ! download_template_from_release "${TEMPLATE}"; then
@@ -287,7 +294,7 @@ if ! pvesm path "${TEMPLATE}" >/dev/null 2>&1; then
     exit 1
   fi
 
-  if ! pvesm path "${TEMPLATE}" >/dev/null 2>&1; then
+  if ! template_file_exists "${TEMPLATE}"; then
     msg_error "Template still not found after download: ${TEMPLATE}"
     exit 1
   fi
