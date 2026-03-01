@@ -1,0 +1,39 @@
+name: Release ROCm LXC Template (Latest)
+
+on:
+  workflow_run:
+    workflows: [Build ROCm LXC Template]
+    types: [completed]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release_latest:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Download artifacts from triggering run
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: release-artifacts
+
+      - name: Publish moving latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lxc-template-latest
+          name: ROCm LXC Template (latest)
+          target_commitish: ${{ github.event.workflow_run.head_sha }}
+          make_latest: true
+          generate_release_notes: false
+          body: |
+            Rolling latest release for the most recent successful template build.
+
+            Source workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
+          files: |
+            release-artifacts/**/*.tar.gz
+            release-artifacts/**/*.sha256

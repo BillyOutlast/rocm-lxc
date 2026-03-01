@@ -1,0 +1,49 @@
+name: Build ROCm LXC Template
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Docker image to convert
+        required: false
+        default: rocm/dev-ubuntu-24.04:7.2-complete
+      template_name:
+        description: Output template basename (without extension)
+        required: false
+        default: rocm-dev-ubuntu-24.04-7.2-complete
+      retention_days:
+        description: Artifact retention (days)
+        required: false
+        default: "14"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Docker version
+        run: docker version
+
+      - name: Build LXC rootfs template
+        env:
+          IMAGE: ${{ github.event.inputs.image || 'rocm/dev-ubuntu-24.04:7.2-complete' }}
+          TEMPLATE_NAME: ${{ github.event.inputs.template_name || 'rocm-dev-ubuntu-24.04-7.2-complete' }}
+          OUTPUT_DIR: dist
+        run: |
+          chmod +x scripts/build-lxc-rootfs.sh
+          scripts/build-lxc-rootfs.sh
+
+      - name: Upload template artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.template_name || 'rocm-dev-ubuntu-24.04-7.2-complete' }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          retention-days: ${{ fromJSON(github.event.inputs.retention_days || '14') }}

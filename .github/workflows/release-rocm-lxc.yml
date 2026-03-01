@@ -1,0 +1,45 @@
+name: Release ROCm LXC Template
+
+on:
+  workflow_run:
+    workflows: [Build ROCm LXC Template]
+    types: [completed]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Download artifacts from triggering run
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: release-artifacts
+
+      - name: Generate release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="lxc-template-${{ github.event.workflow_run.id }}"
+          NAME="ROCm LXC Template (run ${{ github.event.workflow_run.id }})"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          target_commitish: ${{ github.event.workflow_run.head_sha }}
+          make_latest: false
+          generate_release_notes: true
+          files: |
+            release-artifacts/**/*.tar.gz
+            release-artifacts/**/*.sha256
