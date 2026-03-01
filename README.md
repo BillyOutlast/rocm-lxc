@@ -79,6 +79,22 @@ Two helper scripts are included under `scripts/`:
 - `proxmox-install-rocm-ct.sh`: interactive CT creation + resource sizing + optional AMD GPU passthrough
 - `proxmox-update-rocm-ct.sh`: run package updates inside an existing CT from the Proxmox host
 
+### One-line install/update (community-scripts style)
+
+You can run from GitHub raw URLs just like community-scripts:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/<YOUR_GITHUB_USERNAME>/rocm-lxc/main/ct/rocm-lxc.sh)"
+```
+
+Update helper in the same style (example CTID `120`):
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/<YOUR_GITHUB_USERNAME>/rocm-lxc/main/ct/rocm-lxc-update.sh)" - 120
+```
+
+Replace `<YOUR_GITHUB_USERNAME>` with your GitHub account or org that hosts this repo.
+
 Run on the Proxmox host as `root`:
 
 ```bash
@@ -119,3 +135,5 @@ ROCm in LXC usually requires additional host and container configuration (device
 - `scripts/build-lxc-rootfs.sh` - conversion script
 - `scripts/proxmox-install-rocm-ct.sh` - Proxmox CT install/config helper
 - `scripts/proxmox-update-rocm-ct.sh` - Proxmox CT update helper
+- `ct/rocm-lxc.sh` - curl-friendly install entrypoint
+- `ct/rocm-lxc-update.sh` - curl-friendly update entrypoint
