@@ -142,6 +142,38 @@ ct_dns_ok() {
   pct exec "${ctid}" -- bash -lc 'getent hosts archive.ubuntu.com >/dev/null 2>&1 || getent hosts security.ubuntu.com >/dev/null 2>&1 || getent hosts repo.radeon.com >/dev/null 2>&1'
 }
 
+bootstrap_ct_networking() {
+  local ctid="$1"
+  pct exec "${ctid}" -- bash -lc '
+set -euo pipefail
+
+mkdir -p /etc/systemd/network
+cat > /etc/systemd/network/20-eth0-dhcp.network <<EOF
+[Match]
+Name=eth0
+
+[Network]
+DHCP=yes
+DNS=1.1.1.1
+DNS=8.8.8.8
+EOF
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable systemd-networkd >/dev/null 2>&1 || true
+  systemctl restart systemd-networkd >/dev/null 2>&1 || true
+
+  systemctl enable systemd-resolved >/dev/null 2>&1 || true
+  systemctl restart systemd-resolved >/dev/null 2>&1 || true
+
+  if [[ -e /run/systemd/resolve/resolv.conf ]]; then
+    ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf || true
+  elif [[ -e /run/systemd/resolve/stub-resolv.conf ]]; then
+    ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || true
+  fi
+fi
+'
+}
+
 repair_ct_dns() {
   local ctid="$1"
   pct exec "${ctid}" -- bash -lc '
@@ -154,9 +186,24 @@ EOF
 '
 }
 
+print_ct_network_diagnostics() {
+  local ctid="$1"
+  msg_info "CT ${ctid} network diagnostics:"
+  pct exec "${ctid}" -- bash -lc 'set +e; ip -br addr; echo; ip route; echo; cat /etc/resolv.conf' || true
+}
+
 ensure_ct_dns() {
   local ctid="$1"
   if ct_dns_ok "${ctid}"; then
+    return 0
+  fi
+
+  msg_warn "DNS resolution failed in CT ${ctid}; attempting network bootstrap"
+  bootstrap_ct_networking "${ctid}"
+  sleep 2
+
+  if ct_dns_ok "${ctid}"; then
+    msg_ok "DNS resolution recovered in CT ${ctid} after network bootstrap"
     return 0
   fi
 
@@ -170,6 +217,7 @@ ensure_ct_dns() {
   fi
 
   msg_error "DNS is still failing inside CT ${ctid}"
+  print_ct_network_diagnostics "${ctid}"
   msg_error "Check CT network config, bridge, gateway, and host DNS forwarding"
   return 1
 }
