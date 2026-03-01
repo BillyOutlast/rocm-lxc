@@ -109,6 +109,16 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/BillyOutlast/rocm-lxc/ma
 
 Replace `BillyOutlast` with your GitHub account or org that hosts this repo.
 
+If the selected template volume does not exist (for example `local:vztmpl/rocm-dev-ubuntu-24.04-7.2-complete.tar.gz`), installer scripts can now auto-download it from GitHub Releases (`lxc-template-latest`).
+
+- Supports direct `.tar.gz` assets and split `.part` assets
+- Reassembles split assets automatically into `/var/lib/vz/template/cache/`
+
+Optional overrides:
+
+- `GITHUB_REPO` (default: `BillyOutlast/rocm-lxc`)
+- `RELEASE_TAG` (default: `lxc-template-latest`)
+
 Run on the Proxmox host as `root`:
 
 ```bash

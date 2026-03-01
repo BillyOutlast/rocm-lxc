@@ -41,6 +41,131 @@ prompt_yes_no() {
   [[ "${value}" == "y" || "${value}" == "yes" ]]
 }
 
+download_template_from_release() {
+  local template_volume="$1"
+  local repo="${GITHUB_REPO:-BillyOutlast/rocm-lxc}"
+  local tag="${RELEASE_TAG:-lxc-template-latest}"
+
+  if [[ "${template_volume}" != *:vztmpl/* ]]; then
+    msg_warn "Template volume format is not storage:vztmpl/file.tar.gz; skipping auto-download"
+    return 1
+  fi
+
+  local storage="${template_volume%%:*}"
+  local template_name="${template_volume#*:vztmpl/}"
+
+  if [[ "${storage}" != "local" ]]; then
+    msg_warn "Auto-download currently supports only local:vztmpl storage"
+    msg_warn "Selected storage: ${storage}"
+    return 1
+  fi
+
+  local cache_dir="/var/lib/vz/template/cache"
+  local destination="${cache_dir}/${template_name}"
+  mkdir -p "${cache_dir}"
+
+  if [[ -f "${destination}" ]]; then
+    msg_ok "Template already present: ${destination}"
+    return 0
+  fi
+
+  local api_url="https://api.github.com/repos/${repo}/releases/tags/${tag}"
+  local auth_header=()
+  if [[ -n "${GH_TOKEN:-}" ]]; then
+    auth_header=(-H "Authorization: Bearer ${GH_TOKEN}")
+  elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    auth_header=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+  fi
+
+  msg_info "Querying release ${tag} from ${repo}"
+  local release_json
+  release_json="$(curl -fsSL -H "Accept: application/vnd.github+json" "${auth_header[@]}" "${api_url}")"
+
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "${tmp_dir}"' RETURN
+
+  printf "%s" "${release_json}" > "${tmp_dir}/release.json"
+
+  local exact_url
+  local exact_sha_url
+  local parts_sha_url
+  mapfile -t part_urls < <(python3 - "${template_name}" "${tmp_dir}/release.json" <<'PY'
+import json, re, sys
+
+template = sys.argv[1]
+release_file = sys.argv[2]
+with open(release_file, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+assets = data.get("assets", [])
+asset_map = {a.get("name", ""): a.get("browser_download_url", "") for a in assets}
+
+exact_url = asset_map.get(template, "")
+exact_sha = asset_map.get(f"{template}.sha256", "")
+parts_sha = asset_map.get(f"{template}.parts.sha256", "")
+
+if exact_url:
+    print(f"EXACT_URL\t{exact_url}")
+if exact_sha:
+    print(f"EXACT_SHA_URL\t{exact_sha}")
+if parts_sha:
+    print(f"PARTS_SHA_URL\t{parts_sha}")
+
+part_pattern = re.compile(rf"^{re.escape(template)}\.\d{{3}}\.part$")
+for name in sorted(asset_map):
+    if part_pattern.match(name):
+        print(f"PART_URL\t{asset_map[name]}")
+PY
+)
+
+local part_url_list=()
+local line key value
+for line in "${part_urls[@]}"; do
+  key="${line%%$'\t'*}"
+  value="${line#*$'\t'}"
+  case "${key}" in
+    EXACT_URL) exact_url="${value}" ;;
+    EXACT_SHA_URL) exact_sha_url="${value}" ;;
+    PARTS_SHA_URL) parts_sha_url="${value}" ;;
+    PART_URL) part_url_list+=("${value}") ;;
+  esac
+done
+
+if [[ -n "${exact_url:-}" ]]; then
+  msg_info "Downloading template asset ${template_name}"
+  curl -fL "${auth_header[@]}" "${exact_url}" -o "${destination}"
+  if [[ -n "${exact_sha_url:-}" ]]; then
+    curl -fL "${auth_header[@]}" "${exact_sha_url}" -o "${destination}.sha256"
+    (cd "${cache_dir}" && sha256sum -c "$(basename "${destination}.sha256")")
+  fi
+  msg_ok "Downloaded template: ${destination}"
+  return 0
+fi
+
+if [[ "${#part_url_list[@]}" -gt 0 ]]; then
+  msg_info "Downloading ${#part_url_list[@]} split parts for ${template_name}"
+  local part_url part_file
+  for part_url in "${part_url_list[@]}"; do
+    part_file="${tmp_dir}/$(basename "${part_url}")"
+    curl -fL "${auth_header[@]}" "${part_url}" -o "${part_file}"
+  done
+
+  if [[ -n "${parts_sha_url:-}" ]]; then
+    curl -fL "${auth_header[@]}" "${parts_sha_url}" -o "${tmp_dir}/${template_name}.parts.sha256"
+    (cd "${tmp_dir}" && sha256sum -c "${template_name}.parts.sha256")
+  fi
+
+  cat "${tmp_dir}/${template_name}".*.part > "${destination}"
+  sha256sum "${destination}" > "${destination}.sha256"
+  msg_ok "Downloaded and reassembled template: ${destination}"
+  return 0
+fi
+
+msg_error "Template asset not found in ${repo} release tag ${tag}"
+return 1
+}
+
 if [[ "${EUID}" -ne 0 ]]; then
   msg_error "Run this script as root on a Proxmox host"
   exit 1
@@ -51,6 +176,8 @@ require_cmd pvesh
 require_cmd pvesm
 require_cmd awk
 require_cmd sed
+require_cmd curl
+require_cmd python3
 
 DEFAULT_CTID="$(pvesh get /cluster/nextid)"
 DEFAULT_TEMPLATE="local:vztmpl/rocm-dev-ubuntu-24.04-7.2-complete.tar.gz"
@@ -149,9 +276,21 @@ if pct status "${CTID}" >/dev/null 2>&1; then
 fi
 
 if ! pvesm path "${TEMPLATE}" >/dev/null 2>&1; then
-  msg_error "Template not found in storage: ${TEMPLATE}"
-  msg_info "Copy your template tarball into a storage CT template cache first"
-  exit 1
+  msg_warn "Template not found in storage: ${TEMPLATE}"
+  if prompt_yes_no "Download template from GitHub Release automatically" "yes"; then
+    if ! download_template_from_release "${TEMPLATE}"; then
+      msg_error "Automatic template download failed"
+      exit 1
+    fi
+  else
+    msg_info "Copy your template tarball into a storage CT template cache first"
+    exit 1
+  fi
+
+  if ! pvesm path "${TEMPLATE}" >/dev/null 2>&1; then
+    msg_error "Template still not found after download: ${TEMPLATE}"
+    exit 1
+  fi
 fi
 
 NET0="name=eth0,bridge=${BRIDGE},ip=${IPCFG}"
