@@ -13,6 +13,45 @@ template_file_exists() {
   [[ -n "${resolved_path}" && -f "${resolved_path}" ]]
 }
 
+remove_gpu_passthrough_from_conf() {
+  local conf_file="$1"
+  sed -i -E '/^lxc\.cgroup2\.devices\.allow: c 226:\* rwm$/d' "${conf_file}"
+  sed -i -E '/^lxc\.mount\.entry: \/dev\/dri dev\/dri none bind,optional,create=dir$/d' "${conf_file}"
+  sed -i -E '/^lxc\.cgroup2\.devices\.allow: c 235:\* rwm$/d' "${conf_file}"
+  sed -i -E '/^lxc\.mount\.entry: \/dev\/kfd dev\/kfd none bind,optional,create=file$/d' "${conf_file}"
+}
+
+start_ct_with_recovery() {
+  local ctid="$1"
+  local conf_file="$2"
+  local gpu_enabled="$3"
+
+  if pct start "${ctid}"; then
+    return 0
+  fi
+
+  msg_warn "Container ${ctid} failed to start"
+
+  if [[ "${gpu_enabled}" == "yes" ]]; then
+    msg_warn "Retrying start without GPU passthrough entries"
+    remove_gpu_passthrough_from_conf "${conf_file}"
+    if pct start "${ctid}"; then
+      msg_warn "Container ${ctid} started after disabling GPU passthrough"
+      return 0
+    fi
+  fi
+
+  msg_error "Container ${ctid} still failed to start"
+  msg_info "Recent container service logs:"
+  if command -v journalctl >/dev/null 2>&1; then
+    journalctl -u "pve-container@${ctid}.service" -n 80 --no-pager || true
+  else
+    msg_warn "journalctl not found on host"
+  fi
+  msg_info "Container config: /etc/pve/lxc/${ctid}.conf"
+  return 1
+}
+
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
     msg_error "Missing required command: $1"
@@ -361,14 +400,18 @@ fi
 
 if [[ "${START_AFTER}" == "yes" ]]; then
   msg_info "Starting CT ${CTID}"
-  pct start "${CTID}"
+  if ! start_ct_with_recovery "${CTID}" "${CONF}" "${ENABLE_GPU}"; then
+    exit 1
+  fi
 fi
 
 CT_WAS_STARTED_FOR_APPS="no"
 if [[ "${INSTALL_OLLAMA}" == "yes" || "${INSTALL_VLLM}" == "yes" || "${INSTALL_LLAMA_CPP}" == "yes" || "${INSTALL_OPEN_WEBUI}" == "yes" || "${INSTALL_COMFYUI}" == "yes" ]]; then
   if ! pct status "${CTID}" | grep -q "running"; then
     msg_info "Starting CT ${CTID} for optional AI component installation"
-    pct start "${CTID}"
+    if ! start_ct_with_recovery "${CTID}" "${CONF}" "${ENABLE_GPU}"; then
+      exit 1
+    fi
     CT_WAS_STARTED_FOR_APPS="yes"
   fi
 

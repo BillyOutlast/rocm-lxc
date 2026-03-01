@@ -178,6 +178,8 @@ During update (`proxmox-update-rocm-ct.sh` or `ct/rocm-lxc-update.sh`), the scri
 
 Selected components are updated in the CT and their services are restarted when present.
 
+If CT startup fails and GPU passthrough was enabled, installer scripts automatically retry once with `/dev/dri` and `/dev/kfd` passthrough entries removed, then print recent Proxmox container logs for troubleshooting.
+
 ## Notes for ROCm in LXC
 
 ROCm in LXC usually requires additional host and container configuration (device nodes, cgroup permissions, and matching kernel/driver stack). The template build only converts filesystem contents; it does not configure GPU passthrough automatically.
