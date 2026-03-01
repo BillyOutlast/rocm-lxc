@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Copyright (c) 2026 BillyOutlast
+# License: MIT
+# Source: https://github.com/BillyOutlast/rocm-lxc
+
 msg_info() { printf "[INFO] %s\n" "$1"; }
 msg_ok() { printf "[OK] %s\n" "$1"; }
 msg_warn() { printf "[WARN] %s\n" "$1"; }
@@ -111,6 +115,26 @@ prompt_yes_no() {
     [[ "${default_yes}" == "yes" ]] && return 0 || return 1
   fi
   [[ "${value}" == "y" || "${value}" == "yes" ]]
+}
+
+normalize_yes_no() {
+  local value="${1:-}"
+  local default_value="${2:-no}"
+  value="${value,,}"
+  case "${value}" in
+    1|y|yes|true|on) printf "yes" ;;
+    0|n|no|false|off) printf "no" ;;
+    "") printf "%s" "${default_value}" ;;
+    *) printf "%s" "${default_value}" ;;
+  esac
+}
+
+yes_no_to_10() {
+  if [[ "$(normalize_yes_no "${1:-}" "no")" == "yes" ]]; then
+    printf "1"
+  else
+    printf "0"
+  fi
 }
 
 configure_ct_apt_network() {
@@ -380,91 +404,172 @@ DEFAULT_CTID="$(pvesh get /cluster/nextid)"
 DEFAULT_TEMPLATE="local:vztmpl/rocm-dev-ubuntu-24.04-7.2-complete.tar.gz"
 DEFAULT_HOSTNAME="rocm-ct-${DEFAULT_CTID}"
 
+DEFAULT_CORES="${var_cpu:-8}"
+DEFAULT_MEMORY="${var_ram:-32768}"
+DEFAULT_ROOTFS_SIZE="${var_disk:-64}"
+DEFAULT_UNPRIVILEGED="$(normalize_yes_no "${var_unprivileged:-1}" "yes")"
+DEFAULT_ENABLE_GPU="$(normalize_yes_no "${var_gpu:-yes}" "yes")"
+
+NONINTERACTIVE="$(normalize_yes_no "${NONINTERACTIVE:-${PVE_NONINTERACTIVE:-no}}" "no")"
+if [[ ! -t 0 ]]; then
+  NONINTERACTIVE="yes"
+fi
+
+INSTALL_OLLAMA_DEFAULT="$(normalize_yes_no "${INSTALL_OLLAMA:-${ENABLE_OLLAMA:-no}}" "no")"
+INSTALL_VLLM_DEFAULT="$(normalize_yes_no "${INSTALL_VLLM:-no}" "no")"
+INSTALL_LLAMA_CPP_DEFAULT="$(normalize_yes_no "${INSTALL_LLAMA_CPP:-no}" "no")"
+INSTALL_OPEN_WEBUI_DEFAULT="$(normalize_yes_no "${INSTALL_OPEN_WEBUI:-no}" "no")"
+INSTALL_COMFYUI_DEFAULT="$(normalize_yes_no "${INSTALL_COMFYUI:-no}" "no")"
+INSTALL_COMFYUI_MANAGER_DEFAULT="$(normalize_yes_no "${INSTALL_COMFYUI_MANAGER:-yes}" "yes")"
+START_AFTER_DEFAULT="$(normalize_yes_no "${START_AFTER:-yes}" "yes")"
+DOWNLOAD_TEMPLATE_DEFAULT="$(normalize_yes_no "${DOWNLOAD_TEMPLATE:-yes}" "yes")"
+
 msg_info "ROCm LXC installer for Proxmox"
 
-CTID="$(prompt_default "Container ID" "${DEFAULT_CTID}")"
-TEMPLATE="$(prompt_default "Template volume (storage:vztmpl/name.tar.gz)" "${DEFAULT_TEMPLATE}")"
-HOSTNAME="$(prompt_default "Hostname" "${DEFAULT_HOSTNAME}")"
-CORES="$(prompt_default "CPU cores" "8")"
-MEMORY="$(prompt_default "Memory MB" "32768")"
-SWAP="$(prompt_default "Swap MB" "0")"
-ROOTFS_STORAGE="$(prompt_default "Rootfs storage" "local-lvm")"
-ROOTFS_SIZE="$(prompt_default "Rootfs size GB" "64")"
-BRIDGE="$(prompt_default "Network bridge" "vmbr0")"
-IPCFG="$(prompt_default "IP config (dhcp or cidr,gw=...)" "dhcp")"
-
-if prompt_yes_no "Create unprivileged container" "yes"; then
-  UNPRIVILEGED="1"
-else
-  UNPRIVILEGED="0"
+if [[ "${NONINTERACTIVE}" == "yes" ]]; then
+  msg_info "Running in non-interactive mode (Community Scripts compatible env defaults)"
 fi
 
-if prompt_yes_no "Start container after creation" "yes"; then
-  START_AFTER="yes"
-else
-  START_AFTER="no"
-fi
+CTID="${CTID:-${var_ctid:-${DEFAULT_CTID}}}"
+TEMPLATE="${TEMPLATE:-${var_template:-${DEFAULT_TEMPLATE}}}"
+HOSTNAME="${HOSTNAME:-${var_hostname:-${DEFAULT_HOSTNAME}}}"
+CORES="${CORES:-${DEFAULT_CORES}}"
+MEMORY="${MEMORY:-${DEFAULT_MEMORY}}"
+SWAP="${SWAP:-0}"
+ROOTFS_STORAGE="${ROOTFS_STORAGE:-local-lvm}"
+ROOTFS_SIZE="${ROOTFS_SIZE:-${DEFAULT_ROOTFS_SIZE}}"
+BRIDGE="${BRIDGE:-vmbr0}"
+IPCFG="${IPCFG:-dhcp}"
 
-if prompt_yes_no "Enable AMD GPU passthrough (/dev/dri and /dev/kfd)" "yes"; then
-  ENABLE_GPU="yes"
-else
-  ENABLE_GPU="no"
-fi
+if [[ "${NONINTERACTIVE}" != "yes" ]]; then
+  CTID="$(prompt_default "Container ID" "${CTID}")"
+  TEMPLATE="$(prompt_default "Template volume (storage:vztmpl/name.tar.gz)" "${TEMPLATE}")"
+  HOSTNAME="$(prompt_default "Hostname" "${HOSTNAME}")"
+  CORES="$(prompt_default "CPU cores" "${CORES}")"
+  MEMORY="$(prompt_default "Memory MB" "${MEMORY}")"
+  SWAP="$(prompt_default "Swap MB" "${SWAP}")"
+  ROOTFS_STORAGE="$(prompt_default "Rootfs storage" "${ROOTFS_STORAGE}")"
+  ROOTFS_SIZE="$(prompt_default "Rootfs size GB" "${ROOTFS_SIZE}")"
+  BRIDGE="$(prompt_default "Network bridge" "${BRIDGE}")"
+  IPCFG="$(prompt_default "IP config (dhcp or cidr,gw=...)" "${IPCFG}")"
 
-if prompt_yes_no "Install Ollama in container" "no"; then
-  INSTALL_OLLAMA="yes"
-else
-  INSTALL_OLLAMA="no"
-fi
-
-if prompt_yes_no "Install vLLM in container" "no"; then
-  INSTALL_VLLM="yes"
-  VLLM_MODEL="$(prompt_default "vLLM model id" "Qwen/Qwen2.5-7B-Instruct")"
-  VLLM_HOST="$(prompt_default "vLLM bind host" "0.0.0.0")"
-  VLLM_PORT="$(prompt_default "vLLM port" "8000")"
-else
-  INSTALL_VLLM="no"
-  VLLM_MODEL=""
-  VLLM_HOST=""
-  VLLM_PORT=""
-fi
-
-if prompt_yes_no "Install llama.cpp in container" "no"; then
-  INSTALL_LLAMA_CPP="yes"
-  LLAMA_CPP_MODEL_PATH="$(prompt_default "llama.cpp model path" "/opt/models/model.gguf")"
-  LLAMA_CPP_HOST="$(prompt_default "llama.cpp bind host" "0.0.0.0")"
-  LLAMA_CPP_PORT="$(prompt_default "llama.cpp port" "8080")"
-else
-  INSTALL_LLAMA_CPP="no"
-  LLAMA_CPP_MODEL_PATH=""
-  LLAMA_CPP_HOST=""
-  LLAMA_CPP_PORT=""
-fi
-
-if prompt_yes_no "Install Open WebUI in container" "no"; then
-  INSTALL_OPEN_WEBUI="yes"
-  OPEN_WEBUI_HOST="$(prompt_default "Open WebUI bind host" "0.0.0.0")"
-  OPEN_WEBUI_PORT="$(prompt_default "Open WebUI port" "3000")"
-else
-  INSTALL_OPEN_WEBUI="no"
-  OPEN_WEBUI_HOST=""
-  OPEN_WEBUI_PORT=""
-fi
-
-if prompt_yes_no "Install ComfyUI in container" "no"; then
-  INSTALL_COMFYUI="yes"
-  COMFYUI_HOST="$(prompt_default "ComfyUI bind host" "0.0.0.0")"
-  COMFYUI_PORT="$(prompt_default "ComfyUI port" "8188")"
-  if prompt_yes_no "Install ComfyUI-Manager plugin" "yes"; then
-    INSTALL_COMFYUI_MANAGER="yes"
+  if prompt_yes_no "Create unprivileged container" "${DEFAULT_UNPRIVILEGED}"; then
+    UNPRIVILEGED="1"
   else
+    UNPRIVILEGED="0"
+  fi
+
+  if prompt_yes_no "Start container after creation" "${START_AFTER_DEFAULT}"; then
+    START_AFTER="yes"
+  else
+    START_AFTER="no"
+  fi
+
+  if prompt_yes_no "Enable AMD GPU passthrough (/dev/dri and /dev/kfd)" "${DEFAULT_ENABLE_GPU}"; then
+    ENABLE_GPU="yes"
+  else
+    ENABLE_GPU="no"
+  fi
+
+  if prompt_yes_no "Install Ollama in container" "${INSTALL_OLLAMA_DEFAULT}"; then
+    INSTALL_OLLAMA="yes"
+  else
+    INSTALL_OLLAMA="no"
+  fi
+
+  if prompt_yes_no "Install vLLM in container" "${INSTALL_VLLM_DEFAULT}"; then
+    INSTALL_VLLM="yes"
+    VLLM_MODEL="$(prompt_default "vLLM model id" "${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}")"
+    VLLM_HOST="$(prompt_default "vLLM bind host" "${VLLM_HOST:-0.0.0.0}")"
+    VLLM_PORT="$(prompt_default "vLLM port" "${VLLM_PORT:-8000}")"
+  else
+    INSTALL_VLLM="no"
+    VLLM_MODEL=""
+    VLLM_HOST=""
+    VLLM_PORT=""
+  fi
+
+  if prompt_yes_no "Install llama.cpp in container" "${INSTALL_LLAMA_CPP_DEFAULT}"; then
+    INSTALL_LLAMA_CPP="yes"
+    LLAMA_CPP_MODEL_PATH="$(prompt_default "llama.cpp model path" "${LLAMA_CPP_MODEL_PATH:-/opt/models/model.gguf}")"
+    LLAMA_CPP_HOST="$(prompt_default "llama.cpp bind host" "${LLAMA_CPP_HOST:-0.0.0.0}")"
+    LLAMA_CPP_PORT="$(prompt_default "llama.cpp port" "${LLAMA_CPP_PORT:-8080}")"
+  else
+    INSTALL_LLAMA_CPP="no"
+    LLAMA_CPP_MODEL_PATH=""
+    LLAMA_CPP_HOST=""
+    LLAMA_CPP_PORT=""
+  fi
+
+  if prompt_yes_no "Install Open WebUI in container" "${INSTALL_OPEN_WEBUI_DEFAULT}"; then
+    INSTALL_OPEN_WEBUI="yes"
+    OPEN_WEBUI_HOST="$(prompt_default "Open WebUI bind host" "${OPEN_WEBUI_HOST:-0.0.0.0}")"
+    OPEN_WEBUI_PORT="$(prompt_default "Open WebUI port" "${OPEN_WEBUI_PORT:-3000}")"
+  else
+    INSTALL_OPEN_WEBUI="no"
+    OPEN_WEBUI_HOST=""
+    OPEN_WEBUI_PORT=""
+  fi
+
+  if prompt_yes_no "Install ComfyUI in container" "${INSTALL_COMFYUI_DEFAULT}"; then
+    INSTALL_COMFYUI="yes"
+    COMFYUI_HOST="$(prompt_default "ComfyUI bind host" "${COMFYUI_HOST:-0.0.0.0}")"
+    COMFYUI_PORT="$(prompt_default "ComfyUI port" "${COMFYUI_PORT:-8188}")"
+    if prompt_yes_no "Install ComfyUI-Manager plugin" "${INSTALL_COMFYUI_MANAGER_DEFAULT}"; then
+      INSTALL_COMFYUI_MANAGER="yes"
+    else
+      INSTALL_COMFYUI_MANAGER="no"
+    fi
+  else
+    INSTALL_COMFYUI="no"
     INSTALL_COMFYUI_MANAGER="no"
+    COMFYUI_HOST=""
+    COMFYUI_PORT=""
   fi
 else
-  INSTALL_COMFYUI="no"
-  INSTALL_COMFYUI_MANAGER="no"
-  COMFYUI_HOST=""
-  COMFYUI_PORT=""
+  UNPRIVILEGED="$(yes_no_to_10 "${UNPRIVILEGED:-${DEFAULT_UNPRIVILEGED}}")"
+  START_AFTER="$(normalize_yes_no "${START_AFTER:-${START_AFTER_DEFAULT}}" "yes")"
+  ENABLE_GPU="$(normalize_yes_no "${ENABLE_GPU:-${DEFAULT_ENABLE_GPU}}" "yes")"
+
+  INSTALL_OLLAMA="$(normalize_yes_no "${INSTALL_OLLAMA:-${INSTALL_OLLAMA_DEFAULT}}" "no")"
+
+  INSTALL_VLLM="$(normalize_yes_no "${INSTALL_VLLM:-${INSTALL_VLLM_DEFAULT}}" "no")"
+  VLLM_MODEL="${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
+  VLLM_HOST="${VLLM_HOST:-0.0.0.0}"
+  VLLM_PORT="${VLLM_PORT:-8000}"
+  if [[ "${INSTALL_VLLM}" != "yes" ]]; then
+    VLLM_MODEL=""
+    VLLM_HOST=""
+    VLLM_PORT=""
+  fi
+
+  INSTALL_LLAMA_CPP="$(normalize_yes_no "${INSTALL_LLAMA_CPP:-${INSTALL_LLAMA_CPP_DEFAULT}}" "no")"
+  LLAMA_CPP_MODEL_PATH="${LLAMA_CPP_MODEL_PATH:-/opt/models/model.gguf}"
+  LLAMA_CPP_HOST="${LLAMA_CPP_HOST:-0.0.0.0}"
+  LLAMA_CPP_PORT="${LLAMA_CPP_PORT:-8080}"
+  if [[ "${INSTALL_LLAMA_CPP}" != "yes" ]]; then
+    LLAMA_CPP_MODEL_PATH=""
+    LLAMA_CPP_HOST=""
+    LLAMA_CPP_PORT=""
+  fi
+
+  INSTALL_OPEN_WEBUI="$(normalize_yes_no "${INSTALL_OPEN_WEBUI:-${INSTALL_OPEN_WEBUI_DEFAULT}}" "no")"
+  OPEN_WEBUI_HOST="${OPEN_WEBUI_HOST:-0.0.0.0}"
+  OPEN_WEBUI_PORT="${OPEN_WEBUI_PORT:-3000}"
+  if [[ "${INSTALL_OPEN_WEBUI}" != "yes" ]]; then
+    OPEN_WEBUI_HOST=""
+    OPEN_WEBUI_PORT=""
+  fi
+
+  INSTALL_COMFYUI="$(normalize_yes_no "${INSTALL_COMFYUI:-${INSTALL_COMFYUI_DEFAULT}}" "no")"
+  INSTALL_COMFYUI_MANAGER="$(normalize_yes_no "${INSTALL_COMFYUI_MANAGER:-${INSTALL_COMFYUI_MANAGER_DEFAULT}}" "yes")"
+  COMFYUI_HOST="${COMFYUI_HOST:-0.0.0.0}"
+  COMFYUI_PORT="${COMFYUI_PORT:-8188}"
+  if [[ "${INSTALL_COMFYUI}" != "yes" ]]; then
+    INSTALL_COMFYUI_MANAGER="no"
+    COMFYUI_HOST=""
+    COMFYUI_PORT=""
+  fi
 fi
 
 if pct status "${CTID}" >/dev/null 2>&1; then
@@ -474,7 +579,16 @@ fi
 
 if ! template_file_exists "${TEMPLATE}"; then
   msg_warn "Template not found in storage: ${TEMPLATE}"
-  if prompt_yes_no "Download template from GitHub Release automatically" "yes"; then
+  SHOULD_DOWNLOAD_TEMPLATE="${DOWNLOAD_TEMPLATE_DEFAULT}"
+  if [[ "${NONINTERACTIVE}" != "yes" ]]; then
+    if prompt_yes_no "Download template from GitHub Release automatically" "${DOWNLOAD_TEMPLATE_DEFAULT}"; then
+      SHOULD_DOWNLOAD_TEMPLATE="yes"
+    else
+      SHOULD_DOWNLOAD_TEMPLATE="no"
+    fi
+  fi
+
+  if [[ "${SHOULD_DOWNLOAD_TEMPLATE}" == "yes" ]]; then
     if ! download_template_from_release "${TEMPLATE}"; then
       msg_error "Automatic template download failed"
       exit 1

@@ -108,6 +108,23 @@ Update helper in the same style (example CTID `120`):
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/BillyOutlast/rocm-lxc/main/ct/rocm-lxc-update.sh)" - 120
 ```
 
+### Community-scripts compatibility mode
+
+Installer scripts now support a Community Scripts-style env/default model:
+
+- `NONINTERACTIVE=yes` (or `PVE_NONINTERACTIVE=yes`) to skip prompts
+- `var_cpu`, `var_ram`, `var_disk`, `var_unprivileged`, `var_gpu`
+- direct overrides: `CTID`, `TEMPLATE`, `HOSTNAME`, `CORES`, `MEMORY`, `ROOTFS_SIZE`, etc.
+
+Example:
+
+```bash
+NONINTERACTIVE=yes \
+var_cpu=8 var_ram=32768 var_disk=80 var_unprivileged=1 var_gpu=yes \
+CTID=120 HOSTNAME=rocm-ct-120 TEMPLATE=local:vztmpl/rocm-dev-ubuntu-24.04-7.2-complete.tar.gz \
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/BillyOutlast/rocm-lxc/main/ct/rocm-lxc.sh)"
+```
+
 Replace `BillyOutlast` with your GitHub account or org that hosts this repo.
 
 If the selected template volume does not exist (for example `local:vztmpl/rocm-dev-ubuntu-24.04-7.2-complete.tar.gz`), installer scripts can now auto-download it from GitHub Releases (`lxc-template-latest`).
