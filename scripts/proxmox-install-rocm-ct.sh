@@ -42,6 +42,8 @@ start_ct_with_recovery() {
   fi
 
   msg_error "Container ${ctid} still failed to start"
+  msg_info "Running pct start --debug for detailed diagnostics"
+  pct start "${ctid}" --debug || true
   msg_info "Recent container service logs:"
   if command -v journalctl >/dev/null 2>&1; then
     journalctl -u "pve-container@${ctid}.service" -n 80 --no-pager || true
@@ -49,6 +51,30 @@ start_ct_with_recovery() {
     msg_warn "journalctl not found on host"
   fi
   msg_info "Container config: /etc/pve/lxc/${ctid}.conf"
+  return 1
+}
+
+verify_ct_init_present() {
+  local ctid="$1"
+  local mount_output mount_dir
+
+  mount_output="$(pct mount "${ctid}" 2>/dev/null || true)"
+  mount_dir="$(printf '%s\n' "${mount_output}" | sed -n "s/.*'\(.*\)'.*/\1/p" | tail -n1)"
+
+  if [[ -z "${mount_dir}" || ! -d "${mount_dir}" ]]; then
+    msg_warn "Could not mount CT ${ctid} rootfs to validate init binary"
+    return 0
+  fi
+
+  if [[ -x "${mount_dir}/sbin/init" || -x "${mount_dir}/lib/systemd/systemd" ]]; then
+    msg_ok "CT rootfs preflight: init/systemd binary detected"
+    pct unmount "${ctid}" >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  msg_error "CT rootfs preflight failed: no /sbin/init or /lib/systemd/systemd found"
+  msg_error "This Docker-derived rootfs cannot boot as a standard Proxmox LXC without an init system"
+  pct unmount "${ctid}" >/dev/null 2>&1 || true
   return 1
 }
 
@@ -371,6 +397,10 @@ pct create "${CTID}" "${TEMPLATE}" \
   --onboot 1
 
 CONF="/etc/pve/lxc/${CTID}.conf"
+
+if ! verify_ct_init_present "${CTID}"; then
+  exit 1
+fi
 
 if [[ "${ENABLE_GPU}" == "yes" ]]; then
   if [[ ! -e /dev/dri ]]; then
