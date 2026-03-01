@@ -173,7 +173,31 @@ if prompt_yes_no "Update Open WebUI in CT ${CTID}" "no"; then
     pct exec "${CTID}" -- bash -lc 'systemctl daemon-reload; systemctl restart open-webui; systemctl enable open-webui'
     msg_ok "Open WebUI updated and service restarted"
   else
-    msg_warn "Open WebUI updated but open-webui.service not found"
+    msg_warn "open-webui.service not found, creating default unit"
+    pct exec "${CTID}" -- bash -lc 'id -u openwebui >/dev/null 2>&1 || useradd -r -m -d /opt/open-webui -s /usr/sbin/nologin openwebui; mkdir -p /var/lib/open-webui; chown -R openwebui:openwebui /opt/open-webui /var/lib/open-webui || true'
+    pct exec "${CTID}" -- bash -lc "cat > /etc/systemd/system/open-webui.service <<EOF
+[Unit]
+Description=Open WebUI Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openwebui
+Group=openwebui
+WorkingDirectory=/opt/open-webui
+Environment=PATH=/opt/open-webui/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=DATA_DIR=/var/lib/open-webui
+Environment=OLLAMA_BASE_URL=http://127.0.0.1:11434
+ExecStart=/opt/open-webui/.venv/bin/open-webui serve --host 0.0.0.0 --port 3000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF"
+    pct exec "${CTID}" -- bash -lc 'systemctl daemon-reload; systemctl enable --now open-webui'
+    msg_ok "Open WebUI updated and default service created"
   fi
 fi
 
