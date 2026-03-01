@@ -300,6 +300,17 @@ if ! template_file_exists "${TEMPLATE}"; then
   fi
 fi
 
+TEMPLATE_PATH="$(pvesm path "${TEMPLATE}" 2>/dev/null || true)"
+if [[ -n "${TEMPLATE_PATH}" ]]; then
+  if [[ -f "${TEMPLATE_PATH}" ]]; then
+    msg_info "Template preflight: FOUND at ${TEMPLATE_PATH}"
+  else
+    msg_warn "Template preflight: RESOLVED path but file missing at ${TEMPLATE_PATH}"
+  fi
+else
+  msg_warn "Template preflight: unable to resolve path for ${TEMPLATE}"
+fi
+
 NET0="name=eth0,bridge=${BRIDGE},ip=${IPCFG}"
 
 msg_info "Creating CT ${CTID}"
