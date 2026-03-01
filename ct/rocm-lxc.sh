@@ -313,6 +313,12 @@ fi
 
 NET0="name=eth0,bridge=${BRIDGE},ip=${IPCFG}"
 
+if [[ -z "${TEMPLATE_PATH}" || ! -f "${TEMPLATE_PATH}" ]]; then
+  msg_error "Refusing to create CT: template file is missing for ${TEMPLATE}"
+  msg_error "Resolved path: ${TEMPLATE_PATH:-<unresolved>}"
+  exit 1
+fi
+
 msg_info "Creating CT ${CTID}"
 pct create "${CTID}" "${TEMPLATE}" \
   --hostname "${HOSTNAME}" \
