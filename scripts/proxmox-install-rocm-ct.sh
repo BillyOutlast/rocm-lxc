@@ -137,6 +137,43 @@ fi
 '
 }
 
+ct_dns_ok() {
+  local ctid="$1"
+  pct exec "${ctid}" -- bash -lc 'getent hosts archive.ubuntu.com >/dev/null 2>&1 || getent hosts security.ubuntu.com >/dev/null 2>&1 || getent hosts repo.radeon.com >/dev/null 2>&1'
+}
+
+repair_ct_dns() {
+  local ctid="$1"
+  pct exec "${ctid}" -- bash -lc '
+set -euo pipefail
+cat > /etc/resolv.conf <<EOF
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+options timeout:2 attempts:3 rotate
+EOF
+'
+}
+
+ensure_ct_dns() {
+  local ctid="$1"
+  if ct_dns_ok "${ctid}"; then
+    return 0
+  fi
+
+  msg_warn "DNS resolution failed in CT ${ctid}; attempting /etc/resolv.conf repair"
+  repair_ct_dns "${ctid}"
+  sleep 1
+
+  if ct_dns_ok "${ctid}"; then
+    msg_ok "DNS resolution recovered in CT ${ctid}"
+    return 0
+  fi
+
+  msg_error "DNS is still failing inside CT ${ctid}"
+  msg_error "Check CT network config, bridge, gateway, and host DNS forwarding"
+  return 1
+}
+
 ct_apt_update_retry() {
   local ctid="$1"
   pct exec "${ctid}" -- bash -lc '
@@ -487,6 +524,7 @@ if [[ "${INSTALL_OLLAMA}" == "yes" || "${INSTALL_VLLM}" == "yes" || "${INSTALL_L
 
   msg_info "Preparing container package baseline"
   configure_ct_apt_network "${CTID}"
+  ensure_ct_dns "${CTID}"
   ct_apt_update_retry "${CTID}"
   pct exec "${CTID}" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; apt-get -y install curl ca-certificates gnupg lsb-release software-properties-common'
 

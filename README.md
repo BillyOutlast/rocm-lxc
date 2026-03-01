@@ -185,6 +185,8 @@ Installer scripts also validate that CT rootfs contains an init binary (`/sbin/i
 
 Installer and updater scripts now harden APT networking inside the CT (retries, force IPv4, timeouts, and Ubuntu mirror fallback from `archive.ubuntu.com` to `mirrors.edge.kernel.org`) to reduce repeated `Tried to start delayed item ... InRelease, but failed` warnings.
 
+If DNS resolution fails inside the CT (`Could not resolve ...`), scripts now attempt automatic `/etc/resolv.conf` repair (Cloudflare + Google DNS) before package operations.
+
 ## Notes for ROCm in LXC
 
 ROCm in LXC usually requires additional host and container configuration (device nodes, cgroup permissions, and matching kernel/driver stack). The template build only converts filesystem contents; it does not configure GPU passthrough automatically.
