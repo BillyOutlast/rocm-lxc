@@ -84,16 +84,16 @@ Two helper scripts are included under `scripts/`:
 You can run from GitHub raw URLs just like community-scripts:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/<YOUR_GITHUB_USERNAME>/rocm-lxc/main/ct/rocm-lxc.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/BillyOutlast/rocm-lxc/main/ct/rocm-lxc.sh)"
 ```
 
 Update helper in the same style (example CTID `120`):
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/<YOUR_GITHUB_USERNAME>/rocm-lxc/main/ct/rocm-lxc-update.sh)" - 120
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/BillyOutlast/rocm-lxc/main/ct/rocm-lxc-update.sh)" - 120
 ```
 
-Replace `<YOUR_GITHUB_USERNAME>` with your GitHub account or org that hosts this repo.
+Replace `BillyOutlast` with your GitHub account or org that hosts this repo.
 
 Run on the Proxmox host as `root`:
 
