@@ -168,7 +168,7 @@ fi
 
 if prompt_yes_no "Update Open WebUI in CT ${CTID}" "no"; then
   msg_info "Updating Open WebUI"
-  pct exec "${CTID}" -- bash -lc 'if [[ -x /opt/open-webui/.venv/bin/pip ]]; then /opt/open-webui/.venv/bin/pip install --upgrade git+https://github.com/open-webui/open-webui.git; else export DEBIAN_FRONTEND=noninteractive; apt-get -y install python3 python3-venv python3-pip git; id -u openwebui >/dev/null 2>&1 || useradd -r -m -d /opt/open-webui -s /usr/sbin/nologin openwebui; mkdir -p /opt/open-webui /var/lib/open-webui; chown -R openwebui:openwebui /opt/open-webui /var/lib/open-webui; python3 -m venv /opt/open-webui/.venv; /opt/open-webui/.venv/bin/pip install --upgrade pip setuptools wheel; /opt/open-webui/.venv/bin/pip install --upgrade git+https://github.com/open-webui/open-webui.git; fi'
+  pct exec "${CTID}" -- bash -lc 'if [[ -x /opt/open-webui/.venv/bin/pip ]]; then /opt/open-webui/.venv/bin/pip install --upgrade open-webui; else export DEBIAN_FRONTEND=noninteractive; apt-get -y install python3 python3-venv python3-pip git; id -u openwebui >/dev/null 2>&1 || useradd -r -m -d /opt/open-webui -s /usr/sbin/nologin openwebui; mkdir -p /opt/open-webui /var/lib/open-webui; chown -R openwebui:openwebui /opt/open-webui /var/lib/open-webui; python3 -m venv /opt/open-webui/.venv; /opt/open-webui/.venv/bin/pip install --upgrade pip setuptools wheel; /opt/open-webui/.venv/bin/pip install --upgrade open-webui; fi'
   if pct exec "${CTID}" -- bash -lc 'systemctl list-unit-files | grep -q "^open-webui.service"'; then
     pct exec "${CTID}" -- bash -lc 'systemctl daemon-reload; systemctl restart open-webui; systemctl enable open-webui'
     msg_ok "Open WebUI updated and service restarted"
