@@ -4,12 +4,19 @@ set -euo pipefail
 IMAGE="${IMAGE:-rocm/dev-ubuntu-24.04:7.2-complete}"
 OUTPUT_DIR="${OUTPUT_DIR:-dist}"
 TEMPLATE_NAME="${TEMPLATE_NAME:-rocm-dev-ubuntu-24.04-7.2-complete}"
+INSTALL_INIT_SYSTEM="${INSTALL_INIT_SYSTEM:-yes}"
+INIT_PACKAGES="${INIT_PACKAGES:-systemd systemd-sysv dbus}"
 
 WORK_DIR="$(mktemp -d)"
 ROOTFS_DIR="${WORK_DIR}/rootfs"
 mkdir -p "${ROOTFS_DIR}" "${OUTPUT_DIR}"
 
+CONTAINER_ID=""
+
 cleanup() {
+  if [[ -n "${CONTAINER_ID}" ]]; then
+    docker rm -f "${CONTAINER_ID}" >/dev/null 2>&1 || true
+  fi
   rm -rf "${WORK_DIR}"
 }
 trap cleanup EXIT
@@ -17,11 +24,13 @@ trap cleanup EXIT
 echo "Pulling image: ${IMAGE}"
 docker pull "${IMAGE}"
 
-CONTAINER_ID="$(docker create "${IMAGE}")"
-cleanup_container() {
-  docker rm -f "${CONTAINER_ID}" >/dev/null 2>&1 || true
-}
-trap cleanup_container EXIT
+CONTAINER_ID="$(docker create "${IMAGE}" /bin/bash -lc 'sleep infinity')"
+docker start "${CONTAINER_ID}" >/dev/null
+
+if [[ "${INSTALL_INIT_SYSTEM}" == "yes" ]]; then
+  echo "Installing init system packages for LXC boot compatibility..."
+  docker exec "${CONTAINER_ID}" /bin/bash -lc "export DEBIAN_FRONTEND=noninteractive; apt-get update; apt-get -y install ${INIT_PACKAGES}; apt-get clean; rm -rf /var/lib/apt/lists/*"
+fi
 
 echo "Exporting filesystem..."
 docker export "${CONTAINER_ID}" | tar -x -C "${ROOTFS_DIR}"

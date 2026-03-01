@@ -9,9 +9,10 @@ This repository builds a Proxmox-compatible LXC rootfs archive from:
 The workflow:
 
 1. Pulls the Docker image
-2. Exports its merged filesystem with `docker export`
-3. Packs the filesystem into `dist/<template_name>.tar.gz`
-4. Publishes the archive and SHA256 checksum as GitHub Action artifacts
+2. Installs an init system (`systemd` by default) in the build container for LXC boot compatibility
+3. Exports its merged filesystem with `docker export`
+4. Packs the filesystem into `dist/<template_name>.tar.gz`
+5. Publishes the archive and SHA256 checksum as GitHub Action artifacts
 
 ## Run the workflow
 
@@ -185,6 +186,8 @@ Installer scripts also validate that CT rootfs contains an init binary (`/sbin/i
 ## Notes for ROCm in LXC
 
 ROCm in LXC usually requires additional host and container configuration (device nodes, cgroup permissions, and matching kernel/driver stack). The template build only converts filesystem contents; it does not configure GPU passthrough automatically.
+
+LXC containers use the **host kernel** (they do not ship their own kernel), but they still need a userspace init process (`/sbin/init` or systemd) to boot as a managed Proxmox CT. The build script now installs init packages by default so the converted Docker rootfs can start as an LXC container.
 
 ## Proxmox AI Optimization Guide
 
