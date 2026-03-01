@@ -122,14 +122,114 @@ The install helper prompts for:
 - unprivileged mode
 - start on completion
 - AMD GPU passthrough (`/dev/dri`, `/dev/kfd`)
+- optional install of `Ollama`
+- optional install of `vLLM` (model id, host, port)
+- optional install of `llama.cpp` (model path, host, port)
+- optional install of `Open WebUI` (host, port)
+- optional install of `ComfyUI` (host, port)
+- optional install of `ComfyUI-Manager` plugin
+
+When selected, these components are installed inside the CT and configured as systemd services:
+
+- `ollama.service` (enabled + started)
+- `vllm.service` (enabled + started)
+- `llama-cpp.service` (enabled; started when model file exists)
+- `open-webui.service` (enabled + started)
+- `comfyui.service` (enabled + started)
+
+When `Open WebUI` is selected, it is configured to use locally installed backends:
+
+- `Ollama` via `OLLAMA_BASE_URL=http://127.0.0.1:11434`
+- `vLLM` via `OPENAI_API_BASE_URL(S)=http://127.0.0.1:<vllm_port>/v1`
+- `llama.cpp` via `OPENAI_API_BASE_URL(S)=http://127.0.0.1:<llama_cpp_port>/v1`
+
+During update (`proxmox-update-rocm-ct.sh` or `ct/rocm-lxc-update.sh`), the script now asks whether to update each of:
+
+- Ollama
+- vLLM
+- llama.cpp
+- Open WebUI
+- ComfyUI
+- ComfyUI-Manager
+
+Selected components are updated in the CT and their services are restarted when present.
 
 ## Notes for ROCm in LXC
 
 ROCm in LXC usually requires additional host and container configuration (device nodes, cgroup permissions, and matching kernel/driver stack). The template build only converts filesystem contents; it does not configure GPU passthrough automatically.
 
+## Proxmox AI Optimization Guide
+
+For full host and workload tuning guidance across dGPU, iGPU/APU, and hybrid machines, see:
+
+- `docs/PROXMOX-AI-WORKLOAD-GUIDE.md`
+
+## Proxmox AI Readiness Audit
+
+Run an automated host readiness check for AMD dGPU, iGPU/APU, and hybrid setups.
+
+Local script (on Proxmox host as `root`):
+
+```bash
+bash scripts/proxmox-ai-readiness-check.sh
+```
+
+Local JSON output (automation-friendly):
+
+```bash
+bash scripts/proxmox-ai-readiness-check.sh --json
+```
+
+Community-scripts style one-liner:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/BillyOutlast/rocm-lxc/main/ct/rocm-lxc-audit.sh)"
+```
+
+Community-scripts style one-liner with JSON output:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/BillyOutlast/rocm-lxc/main/ct/rocm-lxc-audit.sh)" - --json
+```
+
+Example parse with `jq`:
+
+```bash
+bash scripts/proxmox-ai-readiness-check.sh --json | jq '.summary, .profiles'
+```
+
+The audit checks:
+
+- IOMMU and virtualization baseline
+- GPU/controller detection
+- `/dev/dri` and `/dev/kfd` readiness for LXC GPU sharing
+- host RAM and CPU governor baseline
+- profile readiness summary for dGPU, iGPU/APU, and hybrid machines
+
+### GitHub Action (self-hosted Proxmox runner)
+
+This repository also includes a workflow that runs the audit automatically on a self-hosted runner and uploads a JSON report artifact.
+
+- Workflow: `Audit Proxmox AI Readiness`
+- File: `.github/workflows/audit-proxmox-ai-readiness.yml`
+- Triggers:
+  - manual (`workflow_dispatch`)
+  - weekly schedule (Sunday 04:00 UTC)
+
+Runner requirements:
+
+- self-hosted Linux runner installed on your Proxmox host (or equivalent host with Proxmox tools)
+- ability to run the audit script as `root` (either runner user is root, or passwordless `sudo`)
+
+Output artifact:
+
+- `proxmox-ai-readiness-report.json`
+- workflow job summary with pass/warn/fail counts, profile readiness, and failing checks
+
 ## Files
 
 - `.github/workflows/build-rocm-lxc.yml` - GitHub Action
+- `.github/workflows/audit-proxmox-ai-readiness.yml` - self-hosted Proxmox AI audit workflow
 - `.github/workflows/release-rocm-lxc.yml` - auto-publish workflow to GitHub Releases
 - `.github/workflows/release-rocm-lxc-latest.yml` - rolling latest release workflow
 - `scripts/build-lxc-rootfs.sh` - conversion script
@@ -137,3 +237,6 @@ ROCm in LXC usually requires additional host and container configuration (device
 - `scripts/proxmox-update-rocm-ct.sh` - Proxmox CT update helper
 - `ct/rocm-lxc.sh` - curl-friendly install entrypoint
 - `ct/rocm-lxc-update.sh` - curl-friendly update entrypoint
+- `ct/rocm-lxc-audit.sh` - curl-friendly Proxmox AI readiness audit
+- `docs/PROXMOX-AI-WORKLOAD-GUIDE.md` - Proxmox AI tuning guide (dGPU/iGPU/hybrid)
+- `scripts/proxmox-ai-readiness-check.sh` - local Proxmox AI readiness audit script

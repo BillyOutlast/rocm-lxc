@@ -1,0 +1,91 @@
+name: Audit Proxmox AI Readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      retention_days:
+        description: Artifact retention (days)
+        required: false
+        default: "30"
+  schedule:
+    - cron: "0 4 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Proxmox AI readiness audit (JSON)
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT="proxmox-ai-readiness-report.json"
+          if [[ "$(id -u)" -eq 0 ]]; then
+            bash scripts/proxmox-ai-readiness-check.sh --json > "${REPORT}"
+          elif command -v sudo >/dev/null 2>&1; then
+            sudo bash scripts/proxmox-ai-readiness-check.sh --json > "${REPORT}"
+          else
+            echo "Runner user is not root and sudo is unavailable; cannot execute audit script." >&2
+            exit 1
+          fi
+
+          if [[ ! -s "${REPORT}" ]]; then
+            echo "Audit report was not generated." >&2
+            exit 1
+          fi
+
+      - name: Publish audit job summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT="proxmox-ai-readiness-report.json"
+
+          {
+            echo "## Proxmox AI Readiness Report"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if command -v jq >/dev/null 2>&1; then
+            {
+              echo "### Summary"
+              echo
+              echo "- Pass: $(jq -r '.summary.pass' "$REPORT")"
+              echo "- Warn: $(jq -r '.summary.warn' "$REPORT")"
+              echo "- Fail: $(jq -r '.summary.fail' "$REPORT")"
+              echo
+              echo "### Profiles"
+              echo
+              echo "- dGPU: $(jq -r '.profiles.dgpu' "$REPORT")"
+              echo "- iGPU: $(jq -r '.profiles.igpu' "$REPORT")"
+              echo "- Hybrid: $(jq -r '.profiles.hybrid' "$REPORT")"
+              echo
+              echo "### Failing Checks"
+              FAILING_COUNT="$(jq '[.checks[] | select(.status == "fail")] | length' "$REPORT")"
+              if [[ "$FAILING_COUNT" -eq 0 ]]; then
+                echo "- None"
+              else
+                jq -r '.checks[] | select(.status == "fail") | "- " + .message' "$REPORT"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### Raw JSON"
+              echo
+              echo '```json'
+              cat "$REPORT"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxmox-ai-readiness-${{ github.run_id }}
+          path: proxmox-ai-readiness-report.json
+          retention-days: ${{ fromJSON(github.event.inputs.retention_days || '30') }}
