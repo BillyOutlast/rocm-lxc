@@ -135,7 +135,7 @@ msg_info "Updating packages in CT ${CTID}"
 configure_ct_apt_network "${CTID}"
 ensure_ct_dns "${CTID}"
 ct_apt_update_retry "${CTID}"
-pct exec "${CTID}" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; apt-get -y full-upgrade; apt-get -y autoremove; apt-get autoclean'
+pct exec "${CTID}" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; apt-get -y install zstd curl ca-certificates; apt-get -y full-upgrade; apt-get -y autoremove; apt-get autoclean'
 
 if prompt_yes_no "Update Ollama in CT ${CTID}" "no"; then
   msg_info "Updating Ollama"
