@@ -33,6 +33,20 @@ After each successful **Build ROCm LXC Template** run, release workflows publish
 - Trigger: `workflow_run` on successful build workflow completion
 - Assets uploaded: all generated `.tar.gz` and `.sha256` files
 
+If a template archive exceeds GitHub Release per-asset limits, release workflows automatically split it into `.part` files plus a `.parts.sha256` checksum and reassembly note.
+
+Reassemble on Linux:
+
+```bash
+cat rocm-dev-ubuntu-24.04-7.2-complete.tar.gz.*.part > rocm-dev-ubuntu-24.04-7.2-complete.tar.gz
+```
+
+Or use the helper script:
+
+```bash
+bash scripts/reassemble-template.sh rocm-dev-ubuntu-24.04-7.2-complete.tar.gz
+```
+
 Release tags are created per build run as `lxc-template-<run_id>`.
 The stable rolling release is always available at tag `lxc-template-latest`.
 
@@ -235,6 +249,7 @@ Output artifact:
 - `scripts/build-lxc-rootfs.sh` - conversion script
 - `scripts/proxmox-install-rocm-ct.sh` - Proxmox CT install/config helper
 - `scripts/proxmox-update-rocm-ct.sh` - Proxmox CT update helper
+- `scripts/reassemble-template.sh` - rebuild split release template assets
 - `ct/rocm-lxc.sh` - curl-friendly install entrypoint
 - `ct/rocm-lxc-update.sh` - curl-friendly update entrypoint
 - `ct/rocm-lxc-audit.sh` - curl-friendly Proxmox AI readiness audit

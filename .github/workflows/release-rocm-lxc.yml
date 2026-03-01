@@ -32,6 +32,34 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
 
+      - name: Prepare release assets (split large files)
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAX_BYTES=2147483647
+          SPLIT_SIZE="1900m"
+
+          mkdir -p release-assets
+
+          while IFS= read -r -d '' file; do
+            name="$(basename "$file")"
+            size="$(stat -c%s "$file")"
+
+            if [[ "$name" == *.tar.gz ]] && (( size > MAX_BYTES )); then
+              echo "Splitting oversized asset: $name (${size} bytes)"
+              split -b "$SPLIT_SIZE" -d -a 3 --additional-suffix=.part "$file" "release-assets/${name}."
+              sha256sum release-assets/${name}.*.part > "release-assets/${name}.parts.sha256"
+              {
+                echo "This template was split for GitHub Release upload (2GB per-asset limit)."
+                echo ""
+                echo "Reassemble with:"
+                echo "cat ${name}.*.part > ${name}"
+              } > "release-assets/${name}.parts.README.txt"
+            else
+              cp "$file" "release-assets/$name"
+            fi
+          done < <(find release-artifacts -type f -print0)
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -41,5 +69,4 @@ jobs:
           make_latest: false
           generate_release_notes: true
           files: |
-            release-artifacts/**/*.tar.gz
-            release-artifacts/**/*.sha256
+            release-assets/*
